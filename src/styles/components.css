@@ -1,0 +1,71 @@
+/* Component-specific styles */
+
+/* Glass effect for cards */
+.glass-effect {
+  @apply bg-white/90 backdrop-blur-sm border border-white/20 shadow-lg;
+}
+
+/* MercadoLivre gradient */
+.bg-ml-gradient {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 50%, #fbbf24 100%);
+}
+
+/* Shadow for MercadoLivre theme */
+.shadow-ml {
+  box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.1), 0 10px 10px -5px rgba(59, 130, 246, 0.04);
+}
+
+/* Text colors for MercadoLivre theme */
+.text-ml-gray-dark {
+  @apply text-gray-800;
+}
+
+.text-ml-gray-medium {
+  @apply text-gray-600;
+}
+
+.text-ml-blue {
+  @apply text-blue-600;
+}
+
+/* Animation classes */
+.animate-slideUp {
+  animation: slideUp 0.6s ease-out forwards;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading spinner */
+.loading-spinner {
+  @apply animate-spin rounded-full border-2 border-gray-300 border-t-blue-600;
+}
+
+/* Button styles */
+.btn-primary {
+  @apply bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all duration-200 font-semibold shadow-lg hover:shadow-xl transform hover:scale-105;
+}
+
+.btn-secondary {
+  @apply bg-gray-100 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-200 transition-colors font-medium;
+}
+
+.btn-success {
+  @apply bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors font-semibold;
+}
+
+.btn-warning {
+  @apply bg-yellow-600 hover:bg-yellow-700 text-white px-6 py-3 rounded-lg transition-colors font-semibold;
+}
+
+.btn-danger {
+  @apply bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg transition-colors font-semibold;
+}

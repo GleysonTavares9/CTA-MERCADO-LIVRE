@@ -1,16 +1,27 @@
 {
   "name": "mercadolivre-poster-generator",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-  "description": "Gerador de posters promocionais para produtos do MercadoLivre com sistema de afiliados",
-  "keywords": ["mercadolivre", "afiliados", "poster", "marketing", "react", "typescript"],
+  "description": "Gerador de posters promocionais para produtos do MercadoLivre - Aceita todos os tipos de links de afiliados",
+  "keywords": [
+    "mercadolivre",
+    "afiliados",
+    "poster",
+    "marketing",
+    "react",
+    "typescript"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/dev.js",
+    "dev:vite": "vite",
+    "build": "node scripts/build.js",
+    "build:vite": "vite build",
     "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "preview": "vite preview",
-    "test:gemini": "ts-node -r tsconfig-paths/register src/utils/testGeminiIntegration.ts"
+    "type-check": "tsc --noEmit",
+    "clean": "rimraf dist"
   },
   "dependencies": {
     "@types/html2canvas": "^1.0.0",
@@ -33,6 +44,7 @@
     "globals": "^15.9.0",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
+    "terser": "^5.43.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.2",

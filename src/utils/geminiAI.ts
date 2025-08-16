@@ -1,10 +1,43 @@
 import { ProductData } from '../types';
+import { API_CONFIG } from '../config/constants';
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
 
 export class GeminiAI {
-  private static async callGeminiAPI(prompt: string): Promise<string> {
+  private static async fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    retries = 5, // Aumentado para 5 tentativas
+    initialDelay = 10000 // Aumentado para 10 segundos para evitar limite de taxa
+  ): Promise<Response> {
+    let lastError: Error | undefined;
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetch(url, options);
+        // Sucesso ou erro do cliente que não deve ser repetido (exceto 429)
+        if (response.ok || (response.status >= 400 && response.status !== 429 && response.status < 500)) {
+          return response;
+        }
+        lastError = new Error(`Request failed with status ${response.status}`);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error('Unknown fetch error');
+      }
+
+      if (i < retries - 1) {
+        // Backoff exponencial com jitter
+        const backoff = initialDelay * Math.pow(2, i);
+        const jitter = backoff * 0.2 * Math.random(); // Adiciona até 20% de jitter
+        const delay = backoff + jitter;
+        console.log(`[fetchWithRetry] Attempt ${i + 1} failed. Retrying in ~${Math.round(delay / 1000)}s...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError;
+  }
+
+  private static async callGeminiAPI(prompt: string, model?: string): Promise<string> {
     console.log('🤖 Verificando configuração do Gemini...');
     console.log('🔑 API Key presente:', !!GEMINI_API_KEY);
     console.log('🔑 API Key (primeiros 10 chars):', GEMINI_API_KEY.substring(0, 10) + '...');
@@ -16,8 +49,9 @@ export class GeminiAI {
 
     try {
       console.log('📡 Fazendo requisição para o Gemini...');
-
-      const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      const selectedModel = model || API_CONFIG.gemini.defaultModel;
+      const endpoint = `${API_CONFIG.gemini.baseUrl}/${selectedModel}:generateContent`;
+      const response = await this.fetchWithRetry(`${endpoint}?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -62,11 +96,21 @@ export class GeminiAI {
     }
   }
 
-  static async generateCTA(productData: ProductData, audience: string, style: string): Promise<string> {
+  static async generateCTA(
+    productData: ProductData,
+    audience: string,
+    style: string,
+    aiProvider: 'gemini' | 'local' = 'gemini',
+    aiModel?: string
+  ): Promise<string> {
     const prompt = this.createPrompt(productData, audience, style);
 
     try {
-      return await this.callGeminiAPI(prompt);
+      if (aiProvider === 'local') {
+        // retorna imediatamente template local sem chamar API
+        return this.generateLocalTemplate(productData, audience, style);
+      }
+      return await this.callGeminiAPI(prompt, aiModel);
     } catch (error) {
       console.warn('Usando template local devido ao erro na API:', error);
       return this.generateLocalTemplate(productData, audience, style);

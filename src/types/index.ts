@@ -13,6 +13,8 @@ export interface ProductData {
 export interface GenerationSettings {
   targetAudience: 'auto' | 'jovens' | 'adultos' | 'familia' | 'tecnologia';
   ctaStyle: 'auto' | 'urgencia' | 'beneficios' | 'social' | 'emocional';
+  aiProvider?: 'gemini' | 'local';
+  aiModel?: string; // e.g., 'gemini-1.5-flash-latest'
 }
 
 export type StatusType = 'info' | 'success' | 'error';

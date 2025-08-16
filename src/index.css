@@ -1,3 +1,6 @@
+/* Import component styles */
+@import './styles/components.css';
+
 /* Tailwind CSS directives - warnings são normais no editor */
 @tailwind base;
 @tailwind components;

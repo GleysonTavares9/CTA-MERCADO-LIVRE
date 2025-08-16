@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de Integração Gemini AI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 0;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e9e9e9;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>Teste de Integração Gemini AI</h1>
+    <p>Este teste verifica a comunicação com a API do Google Gemini.</p>
+    
+    <div class="container">
+        <h2>Dados do Produto de Teste</h2>
+        <p><strong>Nome:</strong> Smartphone XYZ - 128GB, Tela 6.5", Câmera Tripla 48MP</p>
+        <p><strong>Preço Original:</strong> R$ 1.999,90</p>
+        <p><strong>Preço com Desconto:</strong> R$ 1.499,90</p>
+        <p><strong>Avaliação:</strong> 4.7/5 (1245 avaliações)</p>
+        
+        <button id="testButton">Testar Integração</button>
+        
+        <h3>Resultado:</h3>
+        <div id="result">Clique no botão para testar a integração.</div>
+    </div>
+
+    <script type="module">
+        document.getElementById('testButton').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('result');
+            const button = document.getElementById('testButton');
+            
+            try {
+                // Desabilitar o botão durante o teste
+                button.disabled = true;
+                resultDiv.innerHTML = '<span class="loading">Testando integração com a API do Gemini... Aguarde.</span>';
+                
+                // Dados de exemplo para teste
+                const testProductData = {
+                    name: 'Smartphone XYZ - 128GB, Tela 6.5", Câmera Tripla 48MP',
+                    originalPrice: 1999.90,
+                    discountPrice: 1499.90,
+                    rating: 4.7,
+                    reviews: 1245,
+                    description: 'Smartphone com processador rápido, tela AMOLED de 6.5 polegadas, câmera tripla de 48MP + 8MP + 5MP, bateria de 5000mAh e carregamento rápido de 33W.',
+                    category: 'Celulares e Smartphones',
+                    image: 'https://http2.mlstatic.com/D_NQ_NP_123456-MLB12345678901_052021-O.jpg',
+                    affiliateLink: 'https://mercadolivre.com.br/produto/1234567890/'
+                };
+                
+                // Criar o prompt manualmente (igual ao que seria gerado no método createPrompt)
+                const discount = testProductData.discountPrice ? 
+                    testProductData.originalPrice - testProductData.discountPrice : 0;
+                const discountPercent = testProductData.discountPrice
+                    ? Math.round((discount / testProductData.originalPrice) * 100)
+                    : 0;
+                
+                const prompt = `Você é um especialista em marketing digital e afiliados do MercadoLivre. Crie uma mensagem de CTA (Call to Action) IRRESISTÍVEL para WhatsApp que converta visitantes em compradores.
+
+DADOS DO PRODUTO:
+📦 Nome: ${testProductData.name}
+💰 Preço Original: R$ ${testProductData.originalPrice.toFixed(2).replace('.', ',')}
+🔥 Preço Promocional: R$ ${testProductData.discountPrice.toFixed(2).replace('.', ',')}
+💸 Desconto: ${discountPercent}% OFF (Economia de R$ ${discount.toFixed(2).replace('.', ',')})
+⭐ Avaliação: ${testProductData.rating}/5 estrelas
+👥 Reviews: ${testProductData.reviews} avaliações
+📝 Descrição: ${testProductData.description}
+🎯 Categoria: ${testProductData.category}
+
+CONFIGURAÇÕES:
+👤 Público-alvo: jovens
+🎨 Estilo: urgencia
+
+INSTRUÇÕES OBRIGATÓRIAS:
+1. ✅ Crie um TÍTULO IMPACTANTE com emojis que chame atenção
+2. ✅ Use URGÊNCIA e ESCASSEZ para criar desejo imediato
+3. ✅ Destaque o DESCONTO e ECONOMIA de forma visual
+4. ✅ Liste 3-4 BENEFÍCIOS PRINCIPAIS com emojis
+5. ✅ Inclua PROVA SOCIAL (avaliações, vendas)
+6. ✅ Use GATILHOS MENTAIS (exclusividade, tempo limitado)
+7. ✅ Termine com CTA FORTE e DIRETO
+8. ✅ Formate para WhatsApp (quebras de linha, emojis)
+9. ✅ NÃO inclua o link na mensagem
+10. ✅ Máximo 15 linhas para não ficar muito longo`;
+                
+                // Mostrar o prompt no resultado
+                resultDiv.innerHTML = `<strong>Prompt enviado para a API:</strong>\n\n${prompt}\n\n<hr>\n<strong>Resposta da API:</strong>\n<span class="loading">Aguardando resposta da API...</span>`;
+                
+                // Fazer a chamada para a API do Gemini
+                const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + import.meta.env.VITE_GEMINI_API_KEY, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: prompt
+                            }]
+                        }],
+                        generationConfig: {
+                            temperature: 0.7,
+                            topK: 40,
+                            topP: 0.95,
+                            maxOutputTokens: 1024,
+                        },
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+                    const generatedText = data.candidates[0].content.parts[0].text;
+                    resultDiv.innerHTML = `<strong>Prompt enviado para a API:</strong>\n\n${prompt}\n\n<hr>\n<strong>Resposta da API (${new Date().toLocaleTimeString()}):</strong>\n\n${generatedText}`;
+                } else {
+                    throw new Error('Resposta inválida da API do Gemini');
+                }
+                
+            } catch (error) {
+                console.error('Erro ao testar integração com Gemini AI:', error);
+                resultDiv.innerHTML = `<strong>❌ Erro ao testar integração:</strong>\n\n${error.message || 'Erro desconhecido'}\n\n<pre>${JSON.stringify(error, null, 2)}</pre>`;
+            } finally {
+                // Reabilitar o botão após o teste
+                button.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

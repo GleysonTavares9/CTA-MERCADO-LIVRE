@@ -1,0 +1,67 @@
+{
+  "name": "mercadolivre-poster-generator",
+  "version": "1.1.0",
+  "description": "Gerador profissional de posters promocionais para produtos do MercadoLivre",
+  "author": "Kiro AI Assistant",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/mercadolivre-poster-generator.git"
+  },
+  "keywords": [
+    "mercadolivre",
+    "affiliate",
+    "poster",
+    "generator",
+    "marketing",
+    "social-media",
+    "whatsapp",
+    "ai",
+    "react",
+    "typescript"
+  ],
+  "features": {
+    "ai_integration": {
+      "provider": "Google Gemini",
+      "version": "1.5-flash-latest",
+      "features": ["message_generation", "cta_optimization"]
+    },
+    "poster_formats": [
+      "Instagram Story (1080x1920)",
+      "Instagram Post (1080x1080)", 
+      "Facebook Post (1200x630)",
+      "Twitter Post (1200x675)",
+      "Promotional Poster (1200x800)"
+    ],
+    "supported_links": [
+      "Direct product links (/p/MLB123, MLB-123456789)",
+      "Affiliate links (/sec/, /aff/, /ref/, /track/)",
+      "Shortened links (/s/, /share/, /go/)",
+      "UTM tracked links (?utm_source=, ?utm_campaign=)",
+      "Reference links (?ref=, ?aff=, ?affiliate=)",
+      "Redirect links (/click/, /redirect/)",
+      "Generic links (/link/, /go/)"
+    ],
+    "export_formats": ["PNG", "High Quality", "Social Media Optimized"],
+    "integrations": ["WhatsApp", "Social Media", "Download"]
+  },
+  "architecture": {
+    "frontend": "React 18 + TypeScript",
+    "styling": "Tailwind CSS",
+    "build_tool": "Vite",
+    "ai_service": "Google Gemini API",
+    "image_generation": "html2canvas",
+    "deployment": ["Netlify", "Vercel", "GitHub Pages"]
+  },
+  "browser_support": {
+    "chrome": ">=90",
+    "firefox": ">=88", 
+    "safari": ">=14",
+    "edge": ">=90"
+  },
+  "performance": {
+    "bundle_size": "<500KB",
+    "first_load": "<2s",
+    "image_generation": "<3s"
+  }
+}

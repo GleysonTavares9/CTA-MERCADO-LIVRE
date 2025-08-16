@@ -6,7 +6,10 @@ export class MercadoLivreParser {
     'https://cors-anywhere.herokuapp.com/',
     'https://corsproxy.io/?'
   ];
-  private static readonly ML_API_BASE = 'https://api.mercadolibre.com';
+  // Em desenvolvimento usamos o proxy do Vite para evitar CORS
+  private static readonly ML_API_BASE = import.meta.env.DEV ? '/ml-api' : 'https://api.mercadolibre.com';
+  // Base absoluta para uso com proxies externos (precisam de URL completa)
+  private static readonly ABSOLUTE_API_BASE = 'https://api.mercadolibre.com';
 
   static async extractProductData(url: string): Promise<ProductData> {
     const timestamp = Date.now();
@@ -64,7 +67,10 @@ export class MercadoLivreParser {
 
   private static async resolveAffiliateLink(url: string): Promise<string> {
     // Se não é link de afiliado, retorna o próprio URL
-    if (!url.includes('/sec/') && !url.includes('/share/') && !url.includes('/s/')) {
+    const hostname = (() => { try { return new URL(url).hostname; } catch { return ''; } })();
+    const isMeliTo = hostname.endsWith('meli.to');
+    const hasShortPath = url.includes('/sec/') || url.includes('/share/') || url.includes('/s/');
+    if (!isMeliTo && !hasShortPath) {
       console.log('📍 Não é link de afiliado, usando URL direta');
       return url;
     }
@@ -89,8 +95,15 @@ export class MercadoLivreParser {
 
           for (const query of searchQueries) {
             try {
-              const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?q=${query}&limit=5`;
-              const response = await fetch(searchUrl);
+              const searchUrl = import.meta.env.DEV
+                ? `/dev-ml/search?q=${encodeURIComponent(query)}&limit=5&site=MLB`
+                : `${this.ML_API_BASE}/sites/MLB/search?q=${query}&limit=5`;
+              const response = await fetch(searchUrl, {
+                headers: {
+                  'Accept': 'application/json',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
+                }
+              });
               
               if (response.ok) {
                 const data = await response.json();
@@ -103,6 +116,9 @@ export class MercadoLivreParser {
                     }
                   }
                 }
+              } else if (response.status === 401 || response.status === 403) {
+                // Não autorizado/bloqueado - não falhar a estratégia inteira, apenas continuar
+                console.log(`⚠️ Busca retornou ${response.status} para query "${query}". Pulando...`);
               }
             } catch (e) {
               console.log(`⚠️ Erro na busca com query "${query}":`, e);
@@ -114,32 +130,105 @@ export class MercadoLivreParser {
 
       // Estratégia 2: Usar proxy CORS
       async () => {
-        const proxyUrl = `${this.CORS_PROXIES[0]}${encodeURIComponent(url)}`;
-        const response = await fetch(proxyUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        // Em dev: usar proxy do Vite para evitar CORS
+        if (import.meta.env.DEV) {
+          // Resolve server-side to get the final URL without browser CORS
+          const res = await fetch(`/dev-ml/resolve?url=${encodeURIComponent(url)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.finalUrl) {
+              console.log('✅ URL final via dev resolver:', data.finalUrl);
+              // Não aceitar links encurtados como resolução final
+              const finalHost = (() => { try { return new URL(data.finalUrl).hostname; } catch { return ''; } })();
+              if (!/\/(sec|s|share)\//i.test(data.finalUrl) && !finalHost.endsWith('meli.to')) {
+                return data.finalUrl;
+              }
+              console.log('⚠️ Dev resolver retornou link encurtado, continuando resolução...');
+            }
           }
-        });
+          // Fallback: fetch HTML server-side
+          const htmlRes = await fetch(`/dev-ml/fetch?url=${encodeURIComponent(url)}`);
+          if (htmlRes.ok) {
+            const html = await htmlRes.text();
+            return html;
+          }
+          // Extra fallback (dev): tentar proxies públicos quando middleware falhar (ex.: 403)
+          try {
+            console.log('⚠️ Dev fetch falhou, tentando proxies públicos...');
+            const proxyCandidates = [
+              `${this.CORS_PROXIES[0]}${encodeURIComponent(url)}`,
+              `${this.CORS_PROXIES[2]}${url}`
+            ];
+            for (const proxyUrl of proxyCandidates) {
+              try {
+                const r = await fetch(proxyUrl, { headers: { 'Accept': '*/*' } });
+                if (r.ok) {
+                  // allorigins retorna JSON { contents }
+                  if (proxyUrl.includes('allorigins')) {
+                    const data = await r.json();
+                    if (data && data.contents) return data.contents as string;
+                  } else {
+                    const text = await r.text();
+                    if (text && text.length > 0) return text;
+                  }
+                }
+              } catch (e) {
+                // tenta próximo
+              }
+            }
+          } catch (e) {
+            // ignorar
+          }
+          throw new Error('Proxy dev falhou');
+        } else {
+          const proxyUrl = `${this.CORS_PROXIES[0]}${encodeURIComponent(url)}`;
+          const response = await fetch(proxyUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+          });
 
-        if (response.ok) {
-          const data = await response.json();
-          return data.contents;
+          if (response.ok) {
+            const data = await response.json();
+            return data.contents;
+          }
+          throw new Error('Proxy CORS falhou');
         }
-        throw new Error('Proxy CORS falhou');
       },
 
       // Estratégia 3: Tentar fetch direto (pode funcionar em alguns casos)
       async () => {
-        const response = await fetch(url, {
-          method: 'HEAD',
-          redirect: 'follow'
-        });
-        
-        if (response.url && response.url !== url) {
-          console.log('✅ Redirecionamento detectado:', response.url);
-          return response.url;
+        // Em dev: usar proxy '/ml-root' e GET (HEAD pode ser bloqueado)
+        if (import.meta.env.DEV) {
+          const res = await fetch(`/dev-ml/resolve?url=${encodeURIComponent(url)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.finalUrl && data.finalUrl !== url) {
+              console.log('✅ Redirecionamento via dev resolver:', data.finalUrl);
+              const finalHost = (() => { try { return new URL(data.finalUrl).hostname; } catch { return ''; } })();
+              if (!/\/(sec|s|share)\//i.test(data.finalUrl) && !finalHost.endsWith('meli.to')) {
+                return data.finalUrl;
+              }
+              console.log('⚠️ Redirecionamento ainda é link encurtado, ignorando');
+            }
+          }
+          throw new Error('Dev resolver não retornou redirecionamento');
+        } else {
+          const response = await fetch(url, {
+            method: 'HEAD',
+            redirect: 'follow'
+          });
+          
+          if (response.url && response.url !== url) {
+            console.log('✅ Redirecionamento detectado:', response.url);
+            const finalHost = (() => { try { return new URL(response.url).hostname; } catch { return ''; } })();
+            if (!/\/(sec|s|share)\//i.test(response.url) && !finalHost.endsWith('meli.to')) {
+              return response.url;
+            }
+            console.log('⚠️ URL final ainda é link encurtado');
+          }
+          throw new Error('Fetch direto não retornou redirecionamento');
         }
-        throw new Error('Fetch direto não retornou redirecionamento');
       },
 
       // Estratégia 4: Tentar construir URLs baseadas em padrões conhecidos
@@ -149,10 +238,12 @@ export class MercadoLivreParser {
           console.log('🔧 Tentando construir URLs com código:', shortCode);
           
           // Tentar diferentes formatos de URL do MercadoLivre
+          const isNumericShort = /^\d{8,}$/.test(shortCode);
           const possibleUrls = [
-            `https://produto.mercadolivre.com.br/MLB-${shortCode}`,
-            `https://www.mercadolivre.com.br/p/MLB${shortCode}`,
-            `https://lista.mercadolivre.com.br/MLB-${shortCode}`,
+            // Só construir variações MLB quando o código é numérico (ID de produto)
+            ...(isNumericShort ? [`https://produto.mercadolivre.com.br/MLB-${shortCode}`] : []),
+            ...(isNumericShort ? [`https://www.mercadolivre.com.br/p/MLB${shortCode}`] : []),
+            // Sempre tentar direto sem MLB para ver se há redirecionamento
             `https://produto.mercadolivre.com.br/${shortCode}`,
             `https://www.mercadolivre.com.br/p/${shortCode}`
           ];
@@ -160,14 +251,58 @@ export class MercadoLivreParser {
           for (const testUrl of possibleUrls) {
             try {
               console.log('🔍 Testando URL:', testUrl);
-              const response = await fetch(testUrl, { 
-                method: 'HEAD',
-                redirect: 'follow'
-              });
-              
-              if (response.ok && response.url && this.isValidMercadoLivreLink(response.url)) {
-                console.log('✅ URL construída com sucesso:', response.url);
-                return response.url;
+              if (import.meta.env.DEV) {
+                const res = await fetch(`/dev-ml/resolve?url=${encodeURIComponent(testUrl)}`);
+                if (res.ok) {
+                  const data = await res.json();
+                  const finalUrl = data?.finalUrl || testUrl;
+                  if (finalUrl && this.isValidMercadoLivreLink(finalUrl)) {
+                    // Só retornar se não for encurtado e parecer produto
+                    const finalHost = (() => { try { return new URL(finalUrl).hostname; } catch { return ''; } })();
+                    const isShort = /\/(sec|s|share)\//i.test(finalUrl) || finalHost.endsWith('meli.to');
+                    const looksLikeProduct = /\/p\/MLB-?\d{8,}/i.test(finalUrl) || /MLB-?\d{8,}/i.test(finalUrl);
+                    if (!isShort && looksLikeProduct) {
+                      console.log('✅ URL construída com sucesso (dev):', finalUrl);
+                      return finalUrl;
+                    }
+                  }
+                  // Se não parecer produto ainda, tentar buscar HTML para extrair permalink
+                  const htmlRes2 = await fetch(`/dev-ml/fetch?url=${encodeURIComponent(finalUrl || testUrl)}`);
+                  if (htmlRes2.ok) {
+                    const html = await htmlRes2.text();
+                    return html;
+                  }
+                }
+              } else {
+                const response = await fetch(testUrl, { 
+                  method: 'HEAD',
+                  redirect: 'follow'
+                });
+                if (response.ok && response.url && this.isValidMercadoLivreLink(response.url)) {
+                  const finalHost = (() => { try { return new URL(response.url).hostname; } catch { return ''; } })();
+                  const isShort = /\/(sec|s|share)\//i.test(response.url) || finalHost.endsWith('meli.to');
+                  const looksLikeProduct = /\/p\/MLB-?\d{8,}/i.test(response.url) || /MLB-?\d{8,}/i.test(response.url);
+                  if (!isShort && looksLikeProduct) {
+                    console.log('✅ URL construída com sucesso:', response.url);
+                    return response.url;
+                  }
+                }
+                // Fallback: tentar GET via proxy para extrair HTML
+                for (const p of this.CORS_PROXIES) {
+                  try {
+                    const proxyUrl = p.includes('allorigins') ? `${p}${encodeURIComponent(testUrl)}` : `${p}${testUrl}`;
+                    const r = await fetch(proxyUrl, { headers: { 'Accept': '*/*' } });
+                    if (r.ok) {
+                      if (p.includes('allorigins')) {
+                        const data = await r.json();
+                        if (data && data.contents) return data.contents as string;
+                      } else {
+                        const text = await r.text();
+                        if (text && text.length > 0) return text;
+                      }
+                    }
+                  } catch {}
+                }
               }
             } catch (e) {
               // Continuar tentando
@@ -185,9 +320,14 @@ export class MercadoLivreParser {
         
         if (typeof result === 'string') {
           if (result.startsWith('http') && result.includes('mercado')) {
-            // Se é uma URL direta, retorna
-            console.log('✅ URL resolvida diretamente:', result);
-            return result;
+            // Aceitar apenas URLs que aparentem ser de produto e não sejam encurtadas
+            const isShort = /\/(sec|s|share)\//i.test(result) || (() => { try { return new URL(result).hostname.endsWith('meli.to'); } catch { return false; } })();
+            const looksLikeProduct = /\/p\/MLB-?\d{8,}/i.test(result) || /MLB-?\d{8,}/i.test(result);
+            if (!isShort && looksLikeProduct && this.isValidMercadoLivreLink(result)) {
+              console.log('✅ URL resolvida diretamente:', result);
+              return result;
+            }
+            console.log('⚠️ URL resolvida não parece produto ou ainda é link encurtado, tentando extrair do HTML se disponível...');
           } else {
             // Se é HTML, processa
             const html = result;
@@ -276,8 +416,15 @@ export class MercadoLivreParser {
     try {
       console.log('🔍 Tentando buscar produto por termo:', searchTerm);
       
-      const searchUrl = `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(searchTerm)}&limit=1`;
-      const response = await fetch(searchUrl);
+      const searchUrl = import.meta.env.DEV
+        ? `/dev-ml/search?q=${encodeURIComponent(searchTerm)}&limit=1&site=MLB`
+        : `${this.ML_API_BASE}/sites/MLB/search?q=${encodeURIComponent(searchTerm)}&limit=1`;
+      const response = await fetch(searchUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36'
+        }
+      });
       
       if (!response.ok) {
         throw new Error(`Erro na busca: ${response.status}`);
@@ -313,118 +460,201 @@ export class MercadoLivreParser {
     const timestamp = Date.now();
     console.log(`🌐 [${timestamp}] Tentando múltiplas estratégias para obter dados...`);
 
-    // Estratégia 1: Tentar API direta primeiro (pode funcionar em alguns casos)
+    // Estratégia 1: Tentar API via middleware em dev, ou direta em prod
     try {
-      console.log(`📡 [${timestamp}] Tentativa 1.0: API direta...`);
-      const itemUrl = `${this.ML_API_BASE}/items/${productId}`;
+      console.log(`📡 [${timestamp}] Tentativa 1.0: API (${import.meta.env.DEV ? 'dev middleware' : 'direta'})...`);
+      const itemUrl = import.meta.env.DEV
+        ? `/dev-ml/items?id=${encodeURIComponent(productId)}`
+        : `${this.ML_API_BASE}/items/${productId}`;
 
       const response = await fetch(itemUrl, {
-        mode: 'cors',
-        cache: 'no-cache',
         headers: {
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache'
+          'Accept': 'application/json'
         }
       });
 
       if (response.ok) {
         const itemData = await response.json();
         if (itemData && itemData.title) {
-          console.log(`✅ [${timestamp}] Dados obtidos via API direta:`, itemData.title);
+          console.log(`✅ [${timestamp}] Dados obtidos via API:`, itemData.title);
           return this.parseApiResponse(itemData, '', 0, 0);
         }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.log(`⚠️ [${timestamp}] API direta falhou (esperado):`, errorMessage);
+      console.log(`⚠️ [${timestamp}] API (${import.meta.env.DEV ? 'dev' : 'direta'}) falhou:`, errorMessage);
     }
 
-    // Estratégia 2: API com múltiplos proxies CORS
-    for (let i = 0; i < this.CORS_PROXIES.length; i++) {
+    // Estratégia 2: (Dev) evitar proxies externos e tentar novamente via middleware
+    if (import.meta.env.DEV) {
       try {
-        console.log(`📡 [${timestamp}] Tentativa 2.${i + 1}: API via proxy CORS...`);
-        const itemUrl = `${this.ML_API_BASE}/items/${productId}?_=${timestamp}`;
-
-        let proxyUrl: string;
-        if (this.CORS_PROXIES[i].includes('allorigins')) {
-          proxyUrl = `${this.CORS_PROXIES[i]}${encodeURIComponent(itemUrl)}`;
-        } else {
-          proxyUrl = `${this.CORS_PROXIES[i]}${itemUrl}`;
-        }
-
-        const response = await fetch(proxyUrl, {
-          cache: 'no-cache',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
+        console.log(`📡 [${timestamp}] Tentativa 2.dev: API via middleware (retry)...`);
+        const r = await fetch(`/dev-ml/items?id=${encodeURIComponent(productId)}`, {
+          headers: { 'Accept': 'application/json' }
         });
-
-        if (response.ok) {
-          let itemData: any;
-
-          if (this.CORS_PROXIES[i].includes('allorigins')) {
-            const data = await response.json();
-            if (data.contents && data.contents.trim()) {
-              itemData = JSON.parse(data.contents);
-            }
-          } else {
-            itemData = await response.json();
-          }
-
+        if (r.ok) {
+          const itemData = await r.json();
           if (itemData && itemData.title) {
-            console.log(`✅ [${timestamp}] Dados obtidos via proxy ${i + 1}:`, itemData.title);
+            console.log(`✅ [${timestamp}] Dados obtidos via middleware (retry):`, itemData.title);
             return this.parseApiResponse(itemData, '', 0, 0);
           }
         }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-        console.log(`⚠️ [${timestamp}] Proxy ${i + 1} falhou:`, errorMessage);
-        continue;
+      } catch (e) {
+        console.log(`⚠️ [${timestamp}] Middleware items falhou:`, e instanceof Error ? e.message : e);
+      }
+      // Dev fallback: tentar proxies públicos para a API oficial quando middleware falhar/bloquear
+      for (let i = 0; i < this.CORS_PROXIES.length; i++) {
+        try {
+          console.log(`📡 [${timestamp}] Tentativa 2.dev.${i + 1}: API via proxy público...`);
+          const absoluteItemUrl = `${this.ABSOLUTE_API_BASE}/items/${productId}?_=${timestamp}`;
+          const proxyBase = this.CORS_PROXIES[i];
+          const proxyUrl = proxyBase.includes('allorigins')
+            ? `${proxyBase}${encodeURIComponent(absoluteItemUrl)}`
+            : `${proxyBase}${absoluteItemUrl}`;
+
+          const resp = await fetch(proxyUrl, { cache: 'no-store' });
+          if (resp.ok) {
+            let itemData: any;
+            if (proxyBase.includes('allorigins')) {
+              const data = await resp.json();
+              if (data.contents && data.contents.trim()) {
+                itemData = JSON.parse(data.contents);
+              }
+            } else {
+              itemData = await resp.json();
+            }
+            if (itemData && itemData.title) {
+              console.log(`✅ [${timestamp}] Dados obtidos via proxy público ${i + 1}:`, itemData.title);
+              return this.parseApiResponse(itemData, '', 0, 0);
+            }
+          }
+        } catch (e) {
+          console.log(`⚠️ [${timestamp}] Proxy público (dev) ${i + 1} falhou:`, e instanceof Error ? e.message : e);
+          continue;
+        }
+      }
+    } else {
+      // Estratégia 2: (Prod) API com múltiplos proxies CORS
+      for (let i = 0; i < this.CORS_PROXIES.length; i++) {
+        try {
+          console.log(`📡 [${timestamp}] Tentativa 2.${i + 1}: API via proxy CORS...`);
+          const absoluteItemUrl = `${this.ABSOLUTE_API_BASE}/items/${productId}?_=${timestamp}`;
+
+          let proxyUrl: string;
+          if (this.CORS_PROXIES[i].includes('allorigins')) {
+            proxyUrl = `${this.CORS_PROXIES[i]}${encodeURIComponent(absoluteItemUrl)}`;
+          } else {
+            proxyUrl = `${this.CORS_PROXIES[i]}${absoluteItemUrl}`;
+          }
+
+          const response = await fetch(proxyUrl, {
+          // Evitar headers que quebram preflight em proxies públicos
+          cache: 'no-store'
+          });
+
+          if (response.ok) {
+            let itemData: any;
+
+            if (this.CORS_PROXIES[i].includes('allorigins')) {
+              const data = await response.json();
+              if (data.contents && data.contents.trim()) {
+                itemData = JSON.parse(data.contents);
+              }
+            } else {
+              itemData = await response.json();
+            }
+
+            if (itemData && itemData.title) {
+              console.log(`✅ [${timestamp}] Dados obtidos via proxy ${i + 1}:`, itemData.title);
+              return this.parseApiResponse(itemData, '', 0, 0);
+            }
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+          console.log(`⚠️ [${timestamp}] Proxy ${i + 1} falhou:`, errorMessage);
+          continue;
+        }
       }
     }
 
     // Estratégia 3: Scraping da página do produto
-    for (let i = 0; i < this.CORS_PROXIES.length; i++) {
+    if (import.meta.env.DEV) {
       try {
-        console.log(`📡 [${timestamp}] Tentativa 3.${i + 1}: Scraping da página...`);
+        console.log(`📡 [${timestamp}] Tentativa 3.dev: Scraping via middleware...`);
         const productUrl = `https://www.mercadolivre.com.br/p/${productId}?_=${timestamp}`;
-
-        let proxyUrl: string;
-        if (this.CORS_PROXIES[i].includes('allorigins')) {
-          proxyUrl = `${this.CORS_PROXIES[i]}${encodeURIComponent(productUrl)}`;
-        } else {
-          proxyUrl = `${this.CORS_PROXIES[i]}${productUrl}`;
-        }
-
-        const response = await fetch(proxyUrl, {
-          cache: 'no-cache',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          }
-        });
-
+        const response = await fetch(`/dev-ml/fetch?url=${encodeURIComponent(productUrl)}`);
         if (response.ok) {
-          let html: string;
-
-          if (this.CORS_PROXIES[i].includes('allorigins')) {
-            const data = await response.json();
-            html = data.contents;
-          } else {
-            html = await response.text();
-          }
-
+          const html = await response.text();
           const productData = this.parseHTMLData(html, productId);
           if (productData.name !== 'Produto não encontrado') {
-            console.log(`✅ [${timestamp}] Dados extraídos via scraping ${i + 1}:`, productData.name);
+            console.log(`✅ [${timestamp}] Dados extraídos via scraping (dev):`, productData.name);
             return productData;
           }
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-        console.log(`⚠️ [${timestamp}] Scraping ${i + 1} falhou:`, errorMessage);
-        continue;
+        console.log(`⚠️ [${timestamp}] Scraping dev falhou:`, errorMessage);
+      }
+      // Dev fallback: scraping via proxies públicos
+      for (let i = 0; i < this.CORS_PROXIES.length; i++) {
+        try {
+          console.log(`📡 [${timestamp}] Tentativa 3.dev.${i + 1}: Scraping via proxy público...`);
+          const productUrl = `https://www.mercadolivre.com.br/p/${productId}?_=${timestamp}`;
+          const base = this.CORS_PROXIES[i];
+          const proxyUrl = base.includes('allorigins')
+            ? `${base}${encodeURIComponent(productUrl)}`
+            : `${base}${productUrl}`;
+          const response = await fetch(proxyUrl, { cache: 'no-store' });
+          if (response.ok) {
+            let html: string;
+            if (base.includes('allorigins')) {
+              const data = await response.json();
+              html = data.contents;
+            } else {
+              html = await response.text();
+            }
+            const productData = this.parseHTMLData(html, productId);
+            if (productData.name !== 'Produto não encontrado') {
+              console.log(`✅ [${timestamp}] Dados extraídos via scraping proxy (dev):`, productData.name);
+              return productData;
+            }
+          }
+        } catch (e) {
+          console.log(`⚠️ [${timestamp}] Scraping proxy (dev) ${i + 1} falhou:`, e instanceof Error ? e.message : e);
+          continue;
+        }
+      }
+    } else {
+      for (let i = 0; i < this.CORS_PROXIES.length; i++) {
+        try {
+          console.log(`📡 [${timestamp}] Tentativa 3.${i + 1}: Scraping da página...`);
+          const productUrl = `https://www.mercadolivre.com.br/p/${productId}?_=${timestamp}`;
+          let proxyUrl: string;
+          if (this.CORS_PROXIES[i].includes('allorigins')) {
+            proxyUrl = `${this.CORS_PROXIES[i]}${encodeURIComponent(productUrl)}`;
+          } else {
+            proxyUrl = `${this.CORS_PROXIES[i]}${productUrl}`;
+          }
+          const response = await fetch(proxyUrl, { cache: 'no-store' });
+          if (response.ok) {
+            let html: string;
+            if (this.CORS_PROXIES[i].includes('allorigins')) {
+              const data = await response.json();
+              html = data.contents;
+            } else {
+              html = await response.text();
+            }
+            const productData = this.parseHTMLData(html, productId);
+            if (productData.name !== 'Produto não encontrado') {
+              console.log(`✅ [${timestamp}] Dados extraídos via scraping ${i + 1}:`, productData.name);
+              return productData;
+            }
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+          console.log(`⚠️ [${timestamp}] Scraping ${i + 1} falhou:`, errorMessage);
+          continue;
+        }
       }
     }
 
@@ -432,17 +662,27 @@ export class MercadoLivreParser {
     try {
       console.log(`📡 [${timestamp}] Tentativa 4: URL alternativa...`);
       const alternativeUrl = `https://produto.mercadolivre.com.br/${productId}`;
-      const proxyUrl = `${this.CORS_PROXIES[0]}${encodeURIComponent(alternativeUrl)}`;
-
-      const response = await fetch(proxyUrl);
-      if (response.ok) {
-        const data = await response.json();
-        const html = data.contents;
-
-        const productData = this.parseHTMLData(html, productId);
-        if (productData.name !== 'Produto não encontrado') {
-          console.log(`✅ [${timestamp}] Dados extraídos via URL alternativa:`, productData.name);
-          return productData;
+      if (import.meta.env.DEV) {
+        const res = await fetch(`/dev-ml/fetch?url=${encodeURIComponent(alternativeUrl)}`);
+        if (res.ok) {
+          const html = await res.text();
+          const productData = this.parseHTMLData(html, productId);
+          if (productData.name !== 'Produto não encontrado') {
+            console.log(`✅ [${timestamp}] Dados extraídos via URL alternativa (dev):`, productData.name);
+            return productData;
+          }
+        }
+      } else {
+        const proxyUrl = `${this.CORS_PROXIES[0]}${encodeURIComponent(alternativeUrl)}`;
+        const response = await fetch(proxyUrl);
+        if (response.ok) {
+          const data = await response.json();
+          const html = data.contents;
+          const productData = this.parseHTMLData(html, productId);
+          if (productData.name !== 'Produto não encontrado') {
+            console.log(`✅ [${timestamp}] Dados extraídos via URL alternativa:`, productData.name);
+            return productData;
+          }
         }
       }
     } catch (error) {
@@ -925,25 +1165,21 @@ export class MercadoLivreParser {
       /[?&]item_id=([A-Z]{2,4}\d{8,})/i     // &item_id=MLB123456789
     ];
 
-    // Tenta extrair usando os padrões
+    // Tentar extrair usando os padrões
     for (const pattern of patterns) {
       try {
         const match = url.match(pattern);
         if (match && match[1]) {
-          let productId = match[1].toUpperCase();
-
-          // Se for apenas números, adicionar prefixo MLB
-          if (/^\d{8,}$/.test(productId)) {
-            productId = 'MLB' + productId;
+          let id = (match[1] || match[2] || match[3] || match[4] || '').toUpperCase();
+          // Normalizar capturas que retornam apenas dígitos ou formato "MLB-<digits>"
+          if (/^\d{8,}$/.test(id)) {
+            id = `MLB${id}`;
+          } else if (/^MLB-\d{8,}$/.test(id)) {
+            id = id.replace(/^MLB-/, 'MLB');
           }
-
-          // Padronizar o formato (remover hífens e outros caracteres)
-          productId = productId.replace(/[^A-Z0-9]/g, '');
-
-          // Validar formato final (MLB seguido de 10 ou mais dígitos)
-          if (/^[A-Z]{2,4}\d{8,}$/.test(productId)) {
-            console.log(`✅ ID extraído (${pattern.source}):`, productId);
-            return productId;
+          if (/^MLB\d{8,}$/.test(id)) {
+            console.log('✅ ID extraído diretamente:', id);
+            return id;
           }
         }
       } catch (error) {
@@ -957,44 +1193,52 @@ export class MercadoLivreParser {
       const urlObj = new URL(url);
       const params = new URLSearchParams(urlObj.search);
 
-      // Verificar todos os parâmetros por valores que pareçam IDs
-      params.forEach((value) => {
-        if (value && value.match(/^[A-Z]{2,4}\d{8,}$/i)) {
-          const productId = value.toUpperCase();
-          console.log('✅ ID extraído dos parâmetros:', productId);
-          return productId;
-        }
-      });
-
-      // Verificar o próprio pathname para IDs
-      const pathSegments = urlObj.pathname.split('/');
-      for (const segment of pathSegments) {
-        if (segment.match(/^[A-Z]{2,4}\d{8,}$/i)) {
-          console.log('✅ ID extraído do caminho:', segment.toUpperCase());
-          return segment.toUpperCase();
+      // Verificar se o URL contém um ID de produto válido
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) {
+          let id = (match[1] || match[2] || match[3] || match[4] || '').toUpperCase();
+          if (/^\d{8,}$/.test(id)) {
+            id = `MLB${id}`;
+          } else if (/^MLB-\d{8,}$/i.test(id)) {
+            id = id.replace(/^MLB-/, 'MLB');
+          }
+          if (/^MLB\d{8,}$/.test(id)) {
+            console.log('✅ ID extraído diretamente:', id);
+            return id;
+          }
         }
       }
+
+      // Fallback: tentar extrair de parâmetros de query comuns
+      try {
+        const urlObj = new URL(url);
+        const candidates = [
+          urlObj.searchParams.get('item_id'),
+          urlObj.searchParams.get('id'),
+          urlObj.searchParams.get('sku'),
+          urlObj.searchParams.get('product_id')
+        ].filter(Boolean) as string[];
+
+        for (const candidate of candidates) {
+          const cleaned = candidate.replace(/[^a-zA-Z0-9-]/g, '').toUpperCase();
+          const match = cleaned.match(/MLB-?(\d{8,})/i);
+          if (match) {
+            const finalId = `MLB${match[1]}`;
+            console.log('✅ ID extraído de parâmetros:', finalId);
+            return finalId;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      console.log('❌ Nenhum ID válido encontrado na URL:', url);
+      return null;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.log('⚠️ Erro ao processar URL:', errorMessage);
+      console.error('❌ Erro crítico ao processar URL:', error);
+      return null;
     }
-
-    // Como último recurso, tentar usar o código do link encurtado
-    if (url.includes('/sec/') || url.includes('/share/') || url.includes('/s/')) {
-      const shortCode = url.split('/').pop();
-      if (shortCode && shortCode.length >= 6) {
-        console.log('🔧 Tentando usar código encurtado como ID:', shortCode);
-        // Tentar construir um ID baseado no código
-        const possibleId = 'MLB' + shortCode.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-        if (possibleId.length >= 10) {
-          console.log('✅ ID construído a partir do código:', possibleId);
-          return possibleId;
-        }
-      }
-    }
-
-    console.log('❌ Nenhum ID válido encontrado na URL:', url);
-    return null;
   }
 
   private static parseApiResponse(data: any, description: string, rating: number, reviews: number): ProductData {
@@ -1319,7 +1563,9 @@ export class MercadoLivreParser {
         'mercadolibre.com.hn',
         'mercadolibre.com.do',
         'mercadolibre.com.pt',
-        'mercadolivre.pt'
+        'mercadolivre.pt',
+        // Shortener oficial usado em links de afiliado/compartilhamento
+        'meli.to'
       ];
 
       const isValidDomain = validDomains.some(domain =>

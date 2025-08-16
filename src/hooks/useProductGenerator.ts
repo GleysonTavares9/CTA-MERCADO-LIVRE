@@ -67,7 +67,7 @@ export const useProductGenerator = () => {
     if (!MercadoLivreParser.isValidMercadoLivreLink(link)) {
       setStatusMessage({
         type: 'error',
-        message: '❌ Link inválido! Use apenas links do Mercado Livre'
+        message: '❌ Link inválido! Use links do MercadoLivre (diretos ou de afiliados)'
       });
       setLinkStatus('error');
       return;
@@ -107,8 +107,14 @@ export const useProductGenerator = () => {
 
       setLoadingText('Gerando mensagem personalizada...');
 
-      // Step 3: Generate CTA message
-      const message = await GeminiAI.generateCTA(extractedData, detectedAudience, detectedStyle);
+      // Step 3: Generate CTA message (respect selected AI provider/model)
+      const message = await GeminiAI.generateCTA(
+        extractedData,
+        detectedAudience,
+        detectedStyle,
+        settings.aiProvider || 'gemini',
+        settings.aiModel
+      );
       
       // Step 4: Add UTM parameters to the link
       const utmLink = addUTMParameters(link, extractedData, detectedAudience, detectedStyle);
